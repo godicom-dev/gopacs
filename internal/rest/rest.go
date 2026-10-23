@@ -51,6 +51,14 @@ func (h Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /app/instances/{id}", h.uiInstance)
 	mux.HandleFunc("GET /app/upload", h.uiUpload)
 	mux.HandleFunc("GET /app/lookup", h.uiLookup)
+	mux.HandleFunc("GET /app/modalities", h.uiModalities)
+	mux.HandleFunc("POST /app/modalities", h.uiPutModality)
+	mux.HandleFunc("POST /app/modalities/{name}/echo", h.uiEchoModality)
+	mux.HandleFunc("POST /app/modalities/{name}/delete", h.uiDeleteModality)
+	mux.HandleFunc("POST /app/patients/{id}/send", h.uiSend("patient"))
+	mux.HandleFunc("POST /app/studies/{id}/send", h.uiSend("study"))
+	mux.HandleFunc("POST /app/series/{id}/send", h.uiSend("series"))
+	mux.HandleFunc("POST /app/instances/{id}/send", h.uiSend("instance"))
 	mux.HandleFunc("GET /app/explorer.css", appAsset("explorer.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET /app/explorer.js", appAsset("explorer.js", "text/javascript; charset=utf-8"))
 	if ohifDirReady(h.OHIFDir) {
@@ -108,6 +116,12 @@ func (h Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /instances", h.upload(max))
 	mux.HandleFunc("POST /tools/lookup", h.lookup(max))
 	mux.HandleFunc("POST /tools/find", h.find(max))
+	mux.HandleFunc("GET /modalities", h.modalities)
+	mux.HandleFunc("PUT /modalities/{name}", h.putModality)
+	mux.HandleFunc("GET /modalities/{name}", h.getModality)
+	mux.HandleFunc("DELETE /modalities/{name}", h.deleteModality)
+	mux.HandleFunc("POST /modalities/{name}/echo", h.echoModality)
+	mux.HandleFunc("POST /modalities/{name}/store", h.storeModality)
 	mux.Handle("/dicom-web/", dicomweb.Handler(webStore{store: h.Store, overwrite: h.Overwrite}, "/dicom-web", dicomweb.WithMaxRequestBytes(max)))
 	return mux
 }
@@ -403,6 +417,10 @@ func writeArchiveError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, r, http.StatusBadRequest, err.Error())
 	case errors.Is(err, archive.ErrNotDICOM):
 		writeError(w, r, http.StatusBadRequest, err.Error())
+	case errors.Is(err, archive.ErrInvalidModality):
+		writeError(w, r, http.StatusBadRequest, err.Error())
+	case errors.Is(err, archive.ErrDuplicateAET):
+		writeError(w, r, http.StatusConflict, err.Error())
 	default:
 		writeError(w, r, http.StatusInternalServerError, "internal error")
 	}

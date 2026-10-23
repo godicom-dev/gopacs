@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -23,7 +22,7 @@ const version = "0.1.0"
 func main() {
 	aeTitle := flag.String("ae", "GOPACS", "called AE title")
 	dicomAddr := flag.String("dicom", ":4242", "DIMSE listen address")
-	httpAddr := flag.String("http", httpListenDefault(), "HTTP listen address")
+	httpAddr := flag.String("http", ":8042", "HTTP listen address")
 	data := flag.String("data", dataDirDefault(), "directory for the index and DICOM files")
 	ohifDir := flag.String("ohif", "ohif-dist", "built OHIF platform/app/dist; ignored when index.html is absent")
 	overwrite := flag.Bool("overwrite", false, "replace an instance that is already stored")
@@ -86,17 +85,6 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
-}
-
-func httpListenDefault() string {
-	port := os.Getenv("PORT")
-	if port == "" {
-		return ":8042"
-	}
-	if strings.Contains(port, ":") {
-		return port
-	}
-	return ":" + port
 }
 
 func dataDirDefault() string {

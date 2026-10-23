@@ -14,6 +14,7 @@
     <a href="/app/studies" {{if eq .Nav "studies"}}aria-current="page"{{end}}>Studies</a>
     <a href="/app/upload" {{if eq .Nav "upload"}}aria-current="page"{{end}}>Upload</a>
     <a href="/app/lookup" {{if eq .Nav "lookup"}}aria-current="page"{{end}}>Lookup</a>
+    <a href="/app/modalities" {{if eq .Nav "modalities"}}aria-current="page"{{end}}>Modalities</a>
   </nav>
   <p id="stats">{{.StatsLine}}</p>
 </header>
@@ -38,6 +39,12 @@
   {{if .Zip}}<a class="button" href="{{.Zip}}">Download ZIP</a>{{end}}
   {{if .Delete}}<button class="danger" type="button" data-delete="{{.Delete}}" data-next="{{.Next}}" data-kind="{{.Kind}}">Delete this {{.Kind}}</button>{{end}}
 </p>
+{{if .Send}}<form method="post" action="{{.Send}}">
+  {{if .Modalities}}
+  <label>Send to <select name="modality">{{range .Modalities}}<option value="{{.Name}}">{{.Name}} ({{.AET}})</option>{{end}}</select></label>
+  <button type="submit">Send</button>
+  {{else}}<p class="empty"><a href="/app/modalities">Add a modality</a> before sending.</p>{{end}}
+</form>{{end}}
 {{end}}
 
 {{define "tags"}}
@@ -105,9 +112,38 @@
 {{template "foot" .}}
 {{end}}
 
+{{define "modalities"}}
+{{template "head" .}}
+<h1>Modalities</h1>
+<div class="panel">
+  <form method="post" action="/app/modalities">
+    <label>Name <input type="text" name="name" required></label>
+    <label>AE Title <input type="text" name="aet" maxlength="16" required></label>
+    <label>Host <input type="text" name="host" required></label>
+    <label>Port <input type="number" name="port" min="1" max="65535" required></label>
+    <button type="submit">Save</button>
+  </form>
+</div>
+<div class="panel">
+  <ul class="rows">
+    {{range .Modalities}}
+    <li class="row"><span><span class="title">{{.Name}}</span><span class="meta sub">{{.AET}} {{.Host}}:{{.Port}}</span></span>
+      <span>
+        <form method="post" action="/app/modalities/{{.Name}}/echo"><button type="submit">C-ECHO</button></form>
+        <form method="post" action="/app/modalities/{{.Name}}/delete"><button class="danger" type="submit">Delete</button></form>
+      </span>
+    </li>
+    {{else}}
+    <li class="empty">No modalities</li>
+    {{end}}
+  </ul>
+</div>
+{{template "foot" .}}
+{{end}}
+
 {{define "message"}}
 {{template "head" .}}
 <h1>{{.Title}}</h1>
-<p class="error">{{.Message}}</p>
+<p class="{{.MessageClass}}">{{.Message}}</p>
 {{template "foot" .}}
 {{end}}

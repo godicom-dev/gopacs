@@ -32,6 +32,8 @@ var (
 	ErrNotFound        = errors.New("archive: resource not found")
 	ErrMissingIdentity = errors.New("archive: PatientID, StudyInstanceUID, SeriesInstanceUID and SOPInstanceUID are required")
 	ErrNotDICOM        = errors.New("archive: not a DICOM Part 10 file")
+	ErrInvalidModality = errors.New("archive: invalid modality")
+	ErrDuplicateAET    = errors.New("archive: AE title already registered")
 )
 
 // PutResult is what a successful store produced.
@@ -143,6 +145,13 @@ CREATE TABLE IF NOT EXISTS changes (
   resource_id TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS modalities (
+  name TEXT PRIMARY KEY,
+  aet TEXT NOT NULL,
+  host TEXT NOT NULL,
+  port INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS modalities_aet ON modalities(aet);
 `)
 	return err
 }

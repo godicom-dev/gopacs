@@ -32,6 +32,16 @@ type uiPage struct {
 	Zip          string
 	Delete       string
 	Next         string
+	Send         string
+	Modalities   []uiModality
+	MessageClass string
+}
+
+type uiModality struct {
+	Name string
+	AET  string
+	Host string
+	Port int
 }
 
 type uiCrumb struct {
@@ -70,10 +80,10 @@ func (h Handler) render(w http.ResponseWriter, code int, name string, p uiPage) 
 
 func (h Handler) uiFail(w http.ResponseWriter, err error) {
 	if errors.Is(err, archive.ErrNotFound) {
-		h.render(w, http.StatusNotFound, "message", uiPage{Title: "Not found", Message: "resource not found"})
+		h.render(w, http.StatusNotFound, "message", uiPage{Title: "Not found", Message: "resource not found", MessageClass: "error"})
 		return
 	}
-	h.render(w, http.StatusInternalServerError, "message", uiPage{Title: "Error", Message: "internal error"})
+	h.render(w, http.StatusInternalServerError, "message", uiPage{Title: "Error", Message: "internal error", MessageClass: "error"})
 }
 
 func (h Handler) uiPatients(w http.ResponseWriter, r *http.Request) {
@@ -121,14 +131,14 @@ func (h Handler) uiPatient(w http.ResponseWriter, r *http.Request) {
 		h.uiFail(w, err)
 		return
 	}
-	h.render(w, http.StatusOK, "detail", uiPage{
+	h.render(w, http.StatusOK, "detail", h.withSend(uiPage{
 		Nav: "patients", Title: orDefault(mainTag(patient, "PatientName"), "Patient"),
 		Crumbs: []uiCrumb{{Href: "/app/patients", Label: "All patients"}},
 		Tags:   tagRows(patient.MainDicomTags),
 		Rows:   studies, Empty: "No studies", ShowChildren: true,
 		Kind: "patient", Zip: "/patients/" + patient.ID + "/archive",
 		Delete: "/patients/" + patient.ID, Next: "/app/patients",
-	})
+	}, "patient", patient.ID))
 }
 
 func (h Handler) uiStudy(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +157,7 @@ func (h Handler) uiStudy(w http.ResponseWriter, r *http.Request) {
 	if title == "" {
 		title = dicomDay(mainTag(study, "StudyDate"))
 	}
-	h.render(w, http.StatusOK, "detail", uiPage{
+	h.render(w, http.StatusOK, "detail", h.withSend(uiPage{
 		Title: orDefault(title, "Study"),
 		Crumbs: []uiCrumb{
 			{Href: "/app/patients/" + study.ParentPatient, Label: orDefault(patientTag(study, "PatientName"), "Patient")},
@@ -157,7 +167,7 @@ func (h Handler) uiStudy(w http.ResponseWriter, r *http.Request) {
 		Kind: "study", Zip: "/studies/" + study.ID + "/archive",
 		Delete: "/studies/" + study.ID, Next: "/app/patients/" + study.ParentPatient,
 		OHIF: "/ohif/viewer?StudyInstanceUIDs=" + url.QueryEscape(mainTag(study, "StudyInstanceUID")),
-	})
+	}, "study", study.ID))
 }
 
 func (h Handler) uiSeries(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +192,7 @@ func (h Handler) uiSeries(w http.ResponseWriter, r *http.Request) {
 		h.uiFail(w, err)
 		return
 	}
-	h.render(w, http.StatusOK, "detail", uiPage{
+	h.render(w, http.StatusOK, "detail", h.withSend(uiPage{
 		Title: orDefault(orDefault(mainTag(series, "SeriesDescription"), mainTag(series, "Modality")), "Series"),
 		Crumbs: []uiCrumb{
 			{Href: "/app/patients/" + study.ParentPatient, Label: orDefault(patientTag(study, "PatientName"), "Patient")},
@@ -193,7 +203,7 @@ func (h Handler) uiSeries(w http.ResponseWriter, r *http.Request) {
 		Tags: tagRows(series.MainDicomTags), Rows: instances, Empty: "No instances", ShowChildren: true,
 		Kind: "series", Zip: "/series/" + series.ID + "/archive",
 		Delete: "/series/" + series.ID, Next: "/app/studies/" + study.ID,
-	})
+	}, "series", series.ID))
 }
 
 func (h Handler) uiInstance(w http.ResponseWriter, r *http.Request) {
@@ -218,7 +228,7 @@ func (h Handler) uiInstance(w http.ResponseWriter, r *http.Request) {
 		h.uiFail(w, err)
 		return
 	}
-	h.render(w, http.StatusOK, "detail", uiPage{
+	h.render(w, http.StatusOK, "detail", h.withSend(uiPage{
 		Title: orDefault(mainTag(instance, "SOPInstanceUID"), "Instance"),
 		Crumbs: []uiCrumb{
 			{Href: "/app/series/" + series.ID, Label: orDefault(mainTag(series, "SeriesDescription"), "Series")},
@@ -230,7 +240,7 @@ func (h Handler) uiInstance(w http.ResponseWriter, r *http.Request) {
 		Zip:      "/instances/" + instance.ID + "/archive",
 		Delete:   "/instances/" + instance.ID,
 		Next:     "/app/series/" + series.ID,
-	})
+	}, "instance", instance.ID))
 }
 
 func (h Handler) uiUpload(w http.ResponseWriter, r *http.Request) {
@@ -376,6 +386,19 @@ func dicomDay(v string) string {
 		return v
 	}
 	return v[:4] + "-" + v[4:6] + "-" + v[6:8]
+}
+
+func (h Handler) withSend(p uiPage, kind, id string) uiPage {
+	p.Send = "/app/" + plural(kind) + "/" + id + "/send"
+	list, err := h.Store.Modalities()
+	if err != nil {
+		return p
+	}
+	p.Modalities = make([]uiModality, len(list))
+	for i, m := range list {
+		p.Modalities[i] = uiModality{Name: m.Name, AET: m.AET, Host: m.Host, Port: m.Port}
+	}
+	return p
 }
 
 func orDefault(v, fallback string) string {
