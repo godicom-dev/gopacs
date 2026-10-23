@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/godicom-dev/gopacs/internal/archive"
@@ -21,8 +23,8 @@ const version = "0.1.0"
 func main() {
 	aeTitle := flag.String("ae", "GOPACS", "called AE title")
 	dicomAddr := flag.String("dicom", ":4242", "DIMSE listen address")
-	httpAddr := flag.String("http", ":8042", "HTTP listen address")
-	data := flag.String("data", "gopacs-data", "directory for the index and DICOM files")
+	httpAddr := flag.String("http", httpListenDefault(), "HTTP listen address")
+	data := flag.String("data", dataDirDefault(), "directory for the index and DICOM files")
 	overwrite := flag.Bool("overwrite", false, "replace an instance that is already stored")
 	maxUpload := flag.Int64("max-upload", 256<<20, "largest accepted HTTP body, in bytes")
 	flag.Parse()
@@ -33,7 +35,7 @@ func main() {
 	}
 	defer store.Close()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	dicomLn, err := net.Listen("tcp", *dicomAddr)
@@ -82,6 +84,24 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+}
+
+func httpListenDefault() string {
+	port := os.Getenv("PORT")
+	if port == "" {
+		return ":8042"
+	}
+	if strings.Contains(port, ":") {
+		return port
+	}
+	return ":" + port
+}
+
+func dataDirDefault() string {
+	if dir := os.Getenv("GOPACS_DATA"); dir != "" {
+		return dir
+	}
+	return "gopacs-data"
 }
 
 func portOf(addr net.Addr) int {

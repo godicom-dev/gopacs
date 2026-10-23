@@ -37,6 +37,14 @@ A second upload of the same instance returns `"Status": "AlreadyStored"` and kee
 
 C-FIND accepts the Patient Root and Study Root models. An empty query value matches anything. `*` and `?` are wildcards, and a `YYYYMMDD-YYYYMMDD` value is a date range.
 
+## Render
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/godicom-dev/gopacs)
+
+`render.yaml` creates a web service on the `0.5c-512mb` plan with a 10 GB disk mounted at `/var/data`. Free instances cannot keep a disk, so stored studies would disappear whenever the service restarts. The image listens on `PORT` (Render's default is `10000`) and caps each upload at 64 MiB.
+
+Render forwards a single public HTTP port. C-ECHO, C-STORE and C-FIND stay inside the private network; a modality on the internet cannot open `:4242`. Upload Part 10 files with `POST /instances`.
+
 ## Not in this version
 
 Worklists, anonymization, modalities and peers, the changes feed, C-MOVE and C-GET, DICOMweb, and a web viewer. This is not Orthanc; the routes above are the part a script needs in order to store and fetch.
