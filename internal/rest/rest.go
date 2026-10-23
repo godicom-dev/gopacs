@@ -8,8 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/godicom-dev/godicom"
-	"github.com/godicom-dev/godicom/tag"
+	"github.com/godicom-dev/gonetdicom/dicomweb"
 	"github.com/godicom-dev/gopacs/internal/archive"
 )
 
@@ -32,6 +31,8 @@ type Handler struct {
 	System    System
 	Overwrite bool
 	MaxUpload int64
+	// OHIFDir is a built OHIF platform/app/dist. Empty or missing index.html leaves /ohif/ unregistered.
+	OHIFDir string
 }
 
 // Routes returns the Orthanc-shaped routes this server implements.
@@ -41,7 +42,27 @@ func (h Handler) Routes() http.Handler {
 		max = 256 << 20
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", h.home)
+	mux.HandleFunc("GET /app/patients", h.uiPatients)
+	mux.HandleFunc("GET /app/studies", h.uiStudies)
+	mux.HandleFunc("GET /app/patients/{id}", h.uiPatient)
+	mux.HandleFunc("GET /app/studies/{id}", h.uiStudy)
+	mux.HandleFunc("GET /app/series/{id}", h.uiSeries)
+	mux.HandleFunc("GET /app/instances/{id}", h.uiInstance)
+	mux.HandleFunc("GET /app/upload", h.uiUpload)
+	mux.HandleFunc("GET /app/lookup", h.uiLookup)
+	mux.HandleFunc("GET /app/explorer.css", appAsset("explorer.css", "text/css; charset=utf-8"))
+	mux.HandleFunc("GET /app/explorer.js", appAsset("explorer.js", "text/javascript; charset=utf-8"))
+	if ohifDirReady(h.OHIFDir) {
+		mux.HandleFunc("GET /ohif", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/ohif/", http.StatusFound)
+		})
+		mux.Handle("GET /ohif/", h.ohif(h.OHIFDir))
+	}
 	mux.HandleFunc("GET /system", h.system)
+	mux.HandleFunc("GET /statistics", h.statistics)
+	mux.HandleFunc("GET /changes", h.changes)
+	mux.HandleFunc("DELETE /changes", h.clearChanges)
 	mux.HandleFunc("GET /patients", h.list("patient"))
 	mux.HandleFunc("GET /studies", h.list("study"))
 	mux.HandleFunc("GET /series", h.list("series"))
@@ -69,6 +90,16 @@ func (h Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /instances/{id}/study", h.parent("instance", "study"))
 	mux.HandleFunc("GET /instances/{id}/patient", h.parent("instance", "patient"))
 
+	mux.HandleFunc("GET /patients/{id}/statistics", h.resourceStatistics("patient"))
+	mux.HandleFunc("GET /studies/{id}/statistics", h.resourceStatistics("study"))
+	mux.HandleFunc("GET /series/{id}/statistics", h.resourceStatistics("series"))
+	mux.HandleFunc("GET /instances/{id}/statistics", h.resourceStatistics("instance"))
+
+	mux.HandleFunc("GET /patients/{id}/archive", h.zipArchive("patient"))
+	mux.HandleFunc("GET /studies/{id}/archive", h.zipArchive("study"))
+	mux.HandleFunc("GET /series/{id}/archive", h.zipArchive("series"))
+	mux.HandleFunc("GET /instances/{id}/archive", h.zipArchive("instance"))
+
 	mux.HandleFunc("GET /instances/{id}/file", h.file)
 	mux.HandleFunc("GET /instances/{id}/simplified-tags", h.simplified)
 	mux.HandleFunc("GET /instances/{id}/tags", h.tags)
@@ -77,6 +108,7 @@ func (h Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /instances", h.upload(max))
 	mux.HandleFunc("POST /tools/lookup", h.lookup(max))
 	mux.HandleFunc("POST /tools/find", h.find(max))
+	mux.Handle("/dicom-web/", dicomweb.Handler(webStore{store: h.Store, overwrite: h.Overwrite}, "/dicom-web", dicomweb.WithMaxRequestBytes(max)))
 	return mux
 }
 
@@ -457,112 +489,4 @@ func stringify(v any) string {
 		raw, _ := json.Marshal(t)
 		return strings.Trim(string(raw), `"`)
 	}
-}
-
-func parseTag(s string) (tag.Tag, error) {
-	s = strings.NewReplacer("-", "", ",", "", "(", "", ")", "").Replace(s)
-	return tag.Parse(s)
-}
-
-func simplifiedTags(ds *godicom.Dataset) map[string]any {
-	return tagObject(ds)
-}
-
-func detailedTags(ds *godicom.Dataset) map[string]any {
-	out := map[string]any{}
-	if ds == nil {
-		return out
-	}
-	for _, tg := range ds.SortedTags() {
-		if skipTag(tg) {
-			continue
-		}
-		elem, ok := ds.Get(tg)
-		if !ok || elem == nil {
-			continue
-		}
-		name, _ := tag.Keyword(tg)
-		entry := map[string]any{"Name": name}
-		if elem.VR == godicom.VRSQ {
-			entry["Type"] = "Sequence"
-			entry["Value"] = sequenceValue(ds, tg)
-		} else if binaryVR(elem.VR) {
-			continue
-		} else {
-			entry["Type"] = "String"
-			value, ok := ds.GetString(tg)
-			if !ok || value == "" {
-				entry["Value"] = nil
-			} else {
-				entry["Value"] = value
-			}
-		}
-		out[formatTag(tg)] = entry
-	}
-	return out
-}
-
-func tagObject(ds *godicom.Dataset) map[string]any {
-	out := map[string]any{}
-	if ds == nil {
-		return out
-	}
-	for _, tg := range ds.SortedTags() {
-		if skipTag(tg) {
-			continue
-		}
-		elem, ok := ds.Get(tg)
-		if !ok || elem == nil || binaryVR(elem.VR) {
-			continue
-		}
-		name, known := tag.Keyword(tg)
-		if !known {
-			name = formatTag(tg)
-		}
-		if elem.VR == godicom.VRSQ {
-			out[name] = sequenceValue(ds, tg)
-			continue
-		}
-		value, ok := ds.GetString(tg)
-		if !ok || value == "" {
-			out[name] = nil
-			continue
-		}
-		out[name] = value
-	}
-	return out
-}
-
-func sequenceValue(ds *godicom.Dataset, tg tag.Tag) []any {
-	seq, ok := ds.GetSequence(tg)
-	if !ok || seq == nil {
-		return []any{}
-	}
-	out := make([]any, 0, len(seq.Items()))
-	for _, item := range seq.Items() {
-		out = append(out, tagObject(item))
-	}
-	return out
-}
-
-func skipTag(tg tag.Tag) bool {
-	return tg == tag.PixelData || tg.Group() == 0x7FE0
-}
-
-func binaryVR(vr godicom.VR) bool {
-	switch vr {
-	case godicom.VROB, godicom.VROW, godicom.VROF, godicom.VROD, godicom.VROL, godicom.VROV, godicom.VRUN:
-		return true
-	default:
-		return false
-	}
-}
-
-func formatTag(tg tag.Tag) string {
-	return strings.ToLower(leftPad(tg.Group()) + "," + leftPad(tg.Element()))
-}
-
-func leftPad(n int) string {
-	const hexdigits = "0123456789abcdef"
-	return string([]byte{hexdigits[(n>>12)&0xF], hexdigits[(n>>8)&0xF], hexdigits[(n>>4)&0xF], hexdigits[n&0xF]})
 }

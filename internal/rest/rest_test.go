@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -14,6 +15,95 @@ import (
 	"github.com/godicom-dev/godicom/uid"
 	"github.com/godicom-dev/gopacs/internal/archive"
 )
+
+func TestExplorerPage(t *testing.T) {
+	st, err := archive.Open(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	h := Handler{Store: st, System: System{Name: "gopacs"}}.Routes()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/app/patients" {
+		t.Fatalf("home %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/app/patients", nil))
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte("All patients")) {
+		t.Fatalf("patients %d %s", rec.Code, rec.Body.String())
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte("location.hash")) {
+		t.Fatal("patient list is still a hash route")
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/app/explorer.js", nil))
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte("data-delete")) || !bytes.Contains(rec.Body.Bytes(), []byte("data-upload")) {
+		t.Fatalf("explorer.js %d %s", rec.Code, rec.Body.String())
+	}
+
+	stored, err := st.Put(part10(t), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/app/studies/"+stored.StudyID, nil))
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte("Open OHIF viewer")) || !bytes.Contains(rec.Body.Bytes(), []byte("data-delete")) {
+		t.Fatalf("study %d %s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("StudyInstanceUIDs=1.2.840.113704.1.111.7016.1342451220.40")) {
+		t.Fatalf("ohif link missing: %s", rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/app/lookup?q=1.2.3.4.5.6", nil))
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte("/app/instances/"+stored.InstanceID)) {
+		t.Fatalf("lookup %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/system", nil))
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"Name":"gopacs"`)) {
+		t.Fatalf("system still json: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestOHIFConfig(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("OHIF-INDEX"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := archive.Open(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	h := Handler{Store: st, OHIFDir: dir}.Routes()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ohif/viewer?StudyInstanceUIDs=1.2.3", nil))
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte("OHIF-INDEX")) {
+		t.Fatalf("viewer %d %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Cross-Origin-Opener-Policy") != "same-origin" {
+		t.Fatalf("coop %s", rec.Header().Get("Cross-Origin-Opener-Policy"))
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ohif/app-config.js", nil))
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`wadoRoot: "/dicom-web"`)) || !bytes.Contains(rec.Body.Bytes(), []byte(`routerBasename = "/ohif/"`)) || !bytes.Contains(rec.Body.Bytes(), []byte(`extensions = []`)) {
+		t.Fatalf("config %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ohif/manifest.json", nil))
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"name":"OHIF Viewer"`)) {
+		t.Fatalf("manifest %d %s", rec.Code, rec.Body.String())
+	}
+}
 
 func TestUploadAndReadBack(t *testing.T) {
 	st, err := archive.Open(filepath.Join(t.TempDir(), "data"))

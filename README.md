@@ -22,6 +22,9 @@ Resource identifiers are Orthanc identifiers: the SHA-1 of the DICOM identity ta
 | Method | Path | |
 |--------|------|--|
 | GET | `/system` | name, version, AE title, ports |
+| GET | `/statistics` | counts and stored bytes, also `/{patients,studies,series,instances}/{id}/statistics` |
+| GET | `/changes` | `?since=&limit=`; `DELETE /changes` clears the log |
+| GET | `/patients/{id}/archive` and the same for studies, series, instances | a ZIP of the DICOM files |
 | POST | `/instances` | upload one Part 10 file |
 | GET | `/patients` `/studies` `/series` `/instances` | identifiers; `?expand` returns the resources |
 | GET | `/patients/{id}` and the same for studies, series, instances | one resource |
@@ -37,6 +40,24 @@ A second upload of the same instance returns `"Status": "AlreadyStored"` and kee
 
 C-FIND accepts the Patient Root and Study Root models. An empty query value matches anything. `*` and `?` are wildcards, and a `YYYYMMDD-YYYYMMDD` value is a date range.
 
+## Page
+
+Open `http://localhost:8042/`. The browser is sent to `/app/patients`. Each list and resource is a normal URL rendered by the server: `/app/patients`, `/app/studies`, `/app/patients/{id}`, `/app/studies/{id}`, `/app/series/{id}`, `/app/instances/{id}`, `/app/upload`, and `/app/lookup`. `explorer.js` only runs the delete and upload buttons.
+
+A study page links to `/ohif/viewer?StudyInstanceUIDs=<StudyInstanceUID>`, the same URL the Orthanc OHIF plugin opens. `-ohif` is the built `platform/app/dist` directory (default `ohif-dist`). When `index.html` is there, gopacs serves it under `/ohif/` and replaces `app-config.js` so OHIF uses `/dicom-web`. The route stays unregistered until that build is present. The page does not render pixels itself.
+
+## DICOMweb
+
+The same archive answers DICOMweb under `/dicom-web`:
+
+| Transaction | Path |
+|-------------|------|
+| STOW-RS | `POST /dicom-web/studies` and `POST /dicom-web/studies/{StudyInstanceUID}` |
+| QIDO-RS | `GET /dicom-web/studies`, `/studies/{study}/series`, `/studies/{study}/series/{series}/instances` |
+| WADO-RS | retrieve a study, series, or instance; `/metadata`; `/frames/{n}`; `/rendered`; `/bulkdata` |
+
+QIDO matches the queried value exactly. A viewer points its DICOMweb root at `http://host:8042/dicom-web`.
+
 ## Render
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/godicom-dev/gopacs)
@@ -47,4 +68,4 @@ Render forwards a single public HTTP port. C-ECHO, C-STORE and C-FIND stay insid
 
 ## Not in this version
 
-Worklists, anonymization, modalities and peers, the changes feed, C-MOVE and C-GET, DICOMweb, and a web viewer. This is not Orthanc; the routes above are the part a script needs in order to store and fetch.
+Worklists, anonymization, modalities and peers, C-MOVE and C-GET. This is not Orthanc; the routes above are the part a script needs in order to store and fetch. Image display is the OHIF viewer, and only when `-ohif` points at a built dist.

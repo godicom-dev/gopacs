@@ -25,6 +25,7 @@ func main() {
 	dicomAddr := flag.String("dicom", ":4242", "DIMSE listen address")
 	httpAddr := flag.String("http", httpListenDefault(), "HTTP listen address")
 	data := flag.String("data", dataDirDefault(), "directory for the index and DICOM files")
+	ohifDir := flag.String("ohif", "ohif-dist", "built OHIF platform/app/dist; ignored when index.html is absent")
 	overwrite := flag.Bool("overwrite", false, "replace an instance that is already stored")
 	maxUpload := flag.Int64("max-upload", 256<<20, "largest accepted HTTP body, in bytes")
 	flag.Parse()
@@ -67,6 +68,7 @@ func main() {
 		},
 		Overwrite: *overwrite,
 		MaxUpload: *maxUpload,
+		OHIFDir:   *ohifDir,
 	}
 	srv := &http.Server{
 		Addr:              *httpAddr,

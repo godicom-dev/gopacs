@@ -5,8 +5,8 @@ go 1.26.0
 toolchain go1.26.4
 
 require (
-	github.com/godicom-dev/godicom v0.33.0
-	github.com/godicom-dev/gonetdicom v0.17.1
+	github.com/godicom-dev/godicom v0.34.0
+	github.com/godicom-dev/gonetdicom v0.18.0
 	modernc.org/sqlite v1.61.0
 )
 

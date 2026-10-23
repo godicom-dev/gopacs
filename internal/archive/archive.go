@@ -10,14 +10,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/godicom-dev/godicom"
-	"github.com/godicom-dev/godicom/tag"
 	"github.com/godicom-dev/gopacs/internal/id"
 	_ "modernc.org/sqlite"
 )
@@ -139,6 +136,13 @@ CREATE INDEX IF NOT EXISTS series_uid ON series(series_uid);
 CREATE INDEX IF NOT EXISTS series_study ON series(study_id);
 CREATE INDEX IF NOT EXISTS instances_uid ON instances(sop_uid);
 CREATE INDEX IF NOT EXISTS instances_series ON instances(series_id);
+CREATE TABLE IF NOT EXISTS changes (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  change_type TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 `)
 	return err
 }
@@ -194,6 +198,19 @@ func (s *Store) Put(part10 []byte, overwrite bool) (PutResult, error) {
 		}
 	}()
 
+	newPatient, err := notExists(tx, "patients", ident.patient)
+	if err != nil {
+		return PutResult{}, err
+	}
+	newStudy, err := notExists(tx, "studies", ident.study)
+	if err != nil {
+		return PutResult{}, err
+	}
+	newSeries, err := notExists(tx, "series", ident.series)
+	if err != nil {
+		return PutResult{}, err
+	}
+
 	if err := upsertParent(tx, `
 INSERT INTO patients(id, dicom_id, main_tags, last_update) VALUES(?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET last_update = excluded.last_update`,
@@ -222,6 +239,29 @@ VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
 			len(part10), ident.indexInSeries, tags, now, ident.instance)
 	}
 	if err != nil {
+		return PutResult{}, err
+	}
+	stamp := time.Now().UTC().Format("20060102T150405")
+	if existingUUID == "" {
+		if err := recordChange(tx, "NewInstance", "Instance", ident.instance, stamp); err != nil {
+			return PutResult{}, err
+		}
+		if newSeries {
+			if err := recordChange(tx, "NewSeries", "Series", ident.series, stamp); err != nil {
+				return PutResult{}, err
+			}
+		}
+		if newStudy {
+			if err := recordChange(tx, "NewStudy", "Study", ident.study, stamp); err != nil {
+				return PutResult{}, err
+			}
+		}
+		if newPatient {
+			if err := recordChange(tx, "NewPatient", "Patient", ident.patient, stamp); err != nil {
+				return PutResult{}, err
+			}
+		}
+	} else if err := recordChange(tx, "UpdatedAttachment", "Instance", ident.instance, stamp); err != nil {
 		return PutResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -449,6 +489,68 @@ func (s *Store) Parent(kind, resourceID, parent string) (string, error) {
 	return id, err
 }
 
+// Part10ByUID reads one instance addressed by its DICOM UIDs.
+func (s *Store) Part10ByUID(studyUID, seriesUID, sopUID string) ([]byte, error) {
+	parts, err := s.readPart10s(`
+SELECT i.file_uuid
+FROM instances i
+JOIN series se ON se.id = i.series_id
+JOIN studies st ON st.id = se.study_id
+WHERE st.study_uid = ? AND se.series_uid = ? AND i.sop_uid = ?`, studyUID, seriesUID, sopUID)
+	if err != nil {
+		return nil, err
+	}
+	return parts[0], nil
+}
+
+// Part10sByUID reads every instance in a study. An empty seriesUID selects the whole study.
+func (s *Store) Part10sByUID(studyUID, seriesUID string) ([][]byte, error) {
+	return s.readPart10s(`
+SELECT i.file_uuid
+FROM instances i
+JOIN series se ON se.id = i.series_id
+JOIN studies st ON st.id = se.study_id
+WHERE st.study_uid = ? AND (? = '' OR se.series_uid = ?)
+ORDER BY se.series_uid, i.index_in_series, i.sop_uid`, studyUID, seriesUID, seriesUID)
+}
+
+func (s *Store) readPart10s(query string, args ...any) ([][]byte, error) {
+	s.mu.Lock()
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	var uuids []string
+	for rows.Next() {
+		var uuid string
+		if err := rows.Scan(&uuid); err != nil {
+			rows.Close()
+			s.mu.Unlock()
+			return nil, err
+		}
+		uuids = append(uuids, uuid)
+	}
+	err = rows.Err()
+	rows.Close()
+	s.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if len(uuids) == 0 {
+		return nil, ErrNotFound
+	}
+	out := make([][]byte, 0, len(uuids))
+	for _, uuid := range uuids {
+		raw, err := os.ReadFile(s.filePath(uuid))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, raw)
+	}
+	return out, nil
+}
+
 // InstanceFile reads the stored Part 10 bytes.
 func (s *Store) InstanceFile(resourceID string) ([]byte, error) {
 	res, err := s.Get("instance", resourceID)
@@ -510,28 +612,6 @@ func (s *Store) Lookup(key string) ([]Hit, error) {
 	return out, nil
 }
 
-// Find returns resources at level whose tags match query. An empty query value
-// matches anything. "*" and "?" are wildcards. A DICOM date range (YYYYMMDD-YYYYMMDD)
-// is honored for tags whose name ends in Date.
-func (s *Store) Find(level string, query map[string]string) ([]Hit, error) {
-	level = normalizeLevel(level)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rows, err := s.scanLevel(level)
-	if err != nil {
-		return nil, err
-	}
-	var out []Hit
-	for _, row := range rows {
-		if matchQuery(query, row.Tags) {
-			out = append(out, row)
-		}
-	}
-	if out == nil {
-		out = []Hit{}
-	}
-	return out, nil
-}
 
 // Delete removes a resource and everything under it, including files.
 func (s *Store) Delete(kind, resourceID string) error {
@@ -548,11 +628,48 @@ func (s *Store) Delete(kind, resourceID string) error {
 	if err != nil {
 		return err
 	}
+	doomed, err := s.removedIDs(kind, canon)
+	if err != nil {
+		return err
+	}
 	table, err := tableFor(kind)
 	if err != nil {
 		return err
 	}
-	if _, err := s.db.Exec(`DELETE FROM `+table+` WHERE id = ?`, canon); err != nil {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM `+table+` WHERE id = ?`, canon); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	stamp := time.Now().UTC().Format("20060102T150405")
+	for _, id := range doomed.instances {
+		if err := recordChange(tx, "DeletedInstance", "Instance", id, stamp); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	for _, id := range doomed.series {
+		if err := recordChange(tx, "DeletedSeries", "Series", id, stamp); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	for _, id := range doomed.studies {
+		if err := recordChange(tx, "DeletedStudy", "Study", id, stamp); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	for _, id := range doomed.patients {
+		if err := recordChange(tx, "DeletedPatient", "Patient", id, stamp); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	for _, uuid := range files {
@@ -608,126 +725,11 @@ func (s *Store) ids(query string, arg string) ([]string, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) scanLevel(level string) ([]Hit, error) {
-	var q string
-	switch level {
-	case LevelPatient:
-		q = `SELECT id, main_tags FROM patients ORDER BY id`
-	case LevelStudy:
-		q = `SELECT st.id, st.main_tags, p.main_tags FROM studies st JOIN patients p ON p.id = st.patient_id ORDER BY st.id`
-	case LevelSeries:
-		q = `SELECT se.id, se.main_tags, st.main_tags, p.main_tags
-FROM series se JOIN studies st ON st.id = se.study_id JOIN patients p ON p.id = st.patient_id ORDER BY se.id`
-	case LevelImage:
-		q = `SELECT i.id, i.main_tags, se.main_tags, st.main_tags, p.main_tags
-FROM instances i JOIN series se ON se.id = i.series_id JOIN studies st ON st.id = se.study_id JOIN patients p ON p.id = st.patient_id
-ORDER BY i.id`
-	default:
-		return nil, fmt.Errorf("archive: unknown level %q", level)
-	}
-	rows, err := s.db.Query(q)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Hit
-	for rows.Next() {
-		switch level {
-		case LevelPatient:
-			var id, tags string
-			if err := rows.Scan(&id, &tags); err != nil {
-				return nil, err
-			}
-			out = append(out, Hit{Kind: "patient", ID: id, Tags: decodeTags(tags)})
-		case LevelStudy:
-			var id, own, parent string
-			if err := rows.Scan(&id, &own, &parent); err != nil {
-				return nil, err
-			}
-			out = append(out, Hit{Kind: "study", ID: id, Tags: mergeTags(decodeTags(parent), decodeTags(own))})
-		case LevelSeries:
-			var id, own, study, patient string
-			if err := rows.Scan(&id, &own, &study, &patient); err != nil {
-				return nil, err
-			}
-			out = append(out, Hit{Kind: "series", ID: id, Tags: mergeTags(decodeTags(patient), decodeTags(study), decodeTags(own))})
-		default:
-			var id, own, series, study, patient string
-			if err := rows.Scan(&id, &own, &series, &study, &patient); err != nil {
-				return nil, err
-			}
-			out = append(out, Hit{Kind: "instance", ID: id, Tags: mergeTags(decodeTags(patient), decodeTags(study), decodeTags(series), decodeTags(own))})
-		}
-	}
-	return out, rows.Err()
-}
 
 func (s *Store) filePath(uuid string) string {
 	return filepath.Join(s.root, "files", uuid+".dcm")
 }
 
-type identity struct {
-	patient, study, series, instance          string
-	dicomPatient, studyUID, seriesUID, sopUID string
-	patientTags, studyTags, seriesTags        map[string]string
-	instanceTags                              map[string]string
-	expected                                  *int
-	indexInSeries                             int
-}
-
-func readIdentity(ds *godicom.Dataset) (identity, error) {
-	patientID, ok1 := ds.GetString(tag.PatientID)
-	studyUID, ok2 := ds.GetString(tag.StudyInstanceUID)
-	seriesUID, ok3 := ds.GetString(tag.SeriesInstanceUID)
-	sopUID, ok4 := ds.GetString(tag.SOPInstanceUID)
-	if !ok1 || !ok2 || !ok3 || !ok4 {
-		return identity{}, ErrMissingIdentity
-	}
-	derived := id.Derive(patientID, studyUID, seriesUID, sopUID)
-	var expected *int
-	if raw, ok := ds.GetString(tag.NumberOfSeriesRelatedInstances); ok {
-		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
-			expected = &n
-		}
-	}
-	index := 0
-	if raw, ok := ds.GetString(tag.InstanceNumber); ok {
-		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
-			index = n
-		}
-	}
-	return identity{
-		patient: derived.Patient, study: derived.Study, series: derived.Series, instance: derived.Instance,
-		dicomPatient: strings.TrimRight(patientID, " \x00"),
-		studyUID:     strings.TrimRight(studyUID, " \x00"),
-		seriesUID:    strings.TrimRight(seriesUID, " \x00"),
-		sopUID:       strings.TrimRight(sopUID, " \x00"),
-		patientTags:  pick(ds, tag.PatientID, tag.PatientName, tag.PatientBirthDate, tag.PatientSex, tag.OtherPatientIDs),
-		studyTags:    pick(ds, tag.StudyInstanceUID, tag.StudyDate, tag.StudyTime, tag.StudyID, tag.StudyDescription, tag.AccessionNumber),
-		seriesTags: pick(ds, tag.SeriesInstanceUID, tag.SeriesNumber, tag.SeriesDescription, tag.Modality, tag.SeriesDate, tag.SeriesTime,
-			tag.Manufacturer, tag.StationName, tag.ProtocolName),
-		instanceTags:  pick(ds, tag.SOPInstanceUID, tag.InstanceNumber, tag.ImageIndex, tag.InstanceCreationDate, tag.InstanceCreationTime),
-		expected:      expected,
-		indexInSeries: index,
-	}, nil
-}
-
-func pick(ds *godicom.Dataset, tags ...tag.Tag) map[string]string {
-	out := map[string]string{}
-	for _, tg := range tags {
-		v, ok := ds.GetString(tg)
-		v = strings.TrimRight(v, " \x00")
-		if !ok || v == "" {
-			continue
-		}
-		name, ok := tag.Keyword(tg)
-		if !ok {
-			continue
-		}
-		out[name] = v
-	}
-	return out
-}
 
 func tableFor(kind string) (string, error) {
 	switch kind {
@@ -744,20 +746,6 @@ func tableFor(kind string) (string, error) {
 	}
 }
 
-func normalizeLevel(level string) string {
-	switch strings.ToUpper(strings.TrimSpace(level)) {
-	case "PATIENT":
-		return LevelPatient
-	case "STUDY":
-		return LevelStudy
-	case "SERIES":
-		return LevelSeries
-	case "IMAGE", "INSTANCE":
-		return LevelImage
-	default:
-		return strings.ToUpper(strings.TrimSpace(level))
-	}
-}
 
 func mustJSON(tags map[string]string) (string, error) {
 	if tags == nil {
@@ -800,48 +788,6 @@ func parseTime(s string) time.Time {
 	return t
 }
 
-func matchQuery(query, tags map[string]string) bool {
-	for key, pattern := range query {
-		if !dicomMatch(pattern, tags[key]) {
-			return false
-		}
-	}
-	return true
-}
-
-func dicomMatch(pattern, value string) bool {
-	pattern = strings.TrimRight(pattern, " \x00")
-	if pattern == "" || pattern == "*" {
-		return true
-	}
-	if strings.Contains(value, `\`) {
-		for _, part := range strings.Split(value, `\`) {
-			if dicomMatch(pattern, part) {
-				return true
-			}
-		}
-		return false
-	}
-	if lo, hi, ok := dateRange(pattern); ok && len(value) >= 8 {
-		day := value[:8]
-		return day >= lo && day <= hi
-	}
-	var b strings.Builder
-	b.WriteByte('^')
-	for _, r := range pattern {
-		switch r {
-		case '*':
-			b.WriteString(".*")
-		case '?':
-			b.WriteByte('.')
-		default:
-			b.WriteString(regexp.QuoteMeta(string(r)))
-		}
-	}
-	b.WriteByte('$')
-	re, err := regexp.Compile(b.String())
-	return err == nil && re.MatchString(value)
-}
 
 func newUUID() string {
 	var b [16]byte
@@ -853,25 +799,3 @@ func newUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-func dateRange(pattern string) (string, string, bool) {
-	dash := strings.IndexByte(pattern, '-')
-	if dash < 0 {
-		return "", "", false
-	}
-	lo, hi := pattern[:dash], pattern[dash+1:]
-	if lo == "" {
-		lo = "00000000"
-	}
-	if hi == "" {
-		hi = "99999999"
-	}
-	if len(lo) != 8 || len(hi) != 8 {
-		return "", "", false
-	}
-	for _, c := range lo + hi {
-		if c < '0' || c > '9' {
-			return "", "", false
-		}
-	}
-	return lo, hi, true
-}

@@ -2,12 +2,12 @@ github.com/dustin/go-humanize v1.1.0 h1:dbKTrvD0klcbBV/h4AWJdMuZogJACoMlvWIWZ5b2
 github.com/dustin/go-humanize v1.1.0/go.mod h1:hc1CvRkJMsgxqjmjMQF3QNRAZBwY8AXBAzKYoSX9sFI=
 github.com/ebitengine/purego v0.10.1 h1:dewVBCBT2GaMu1SrNTYxQhgQBethzfhiwvZiLGP/qyY=
 github.com/ebitengine/purego v0.10.1/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
-github.com/godicom-dev/godicom v0.33.0 h1:aHlRxxqPPyvAA9Y82OCXL3G2IZ2nZymjoHSFAshzEqE=
-github.com/godicom-dev/godicom v0.33.0/go.mod h1:VyMCPoz1P4KcL1RN2Q1fAKQJI8cLFEB6t/sqipB2F0I=
+github.com/godicom-dev/godicom v0.34.0 h1:R44UtPoJFtFbw88BqlUNypUoDH26zBiNpZN0XrGxSiA=
+github.com/godicom-dev/godicom v0.34.0/go.mod h1:VyMCPoz1P4KcL1RN2Q1fAKQJI8cLFEB6t/sqipB2F0I=
 github.com/godicom-dev/golibjpeg v1.3.0 h1:FXuwjJFi/4x4XOJ2R9G9pXjZzygvAfzRNNJnBNSJadU=
 github.com/godicom-dev/golibjpeg v1.3.0/go.mod h1:i6eA5kZXzxv4ER8Lr60sFNmIrD5Z1MddgyI3LzXQ7x0=
-github.com/godicom-dev/gonetdicom v0.17.1 h1:+AEhwh18LmsiMQBYQMLGAaByoAoz6Dt1agOQKiADbwU=
-github.com/godicom-dev/gonetdicom v0.17.1/go.mod h1:aGayT+2z9uhh4AqmyN99IJK4p/84r279B5VwbTzz2zA=
+github.com/godicom-dev/gonetdicom v0.18.0 h1:PsR+Bljt3qH3kG9Bt59eAQYS21iig954LmZfblEfkXE=
+github.com/godicom-dev/gonetdicom v0.18.0/go.mod h1:rRtv33lkRh9mdlcfsrzrDRUmQtDtE8N3S8HVj6Bn0fc=
 github.com/godicom-dev/goopenjpeg v1.3.0 h1:B4GoJapBaRBD3bkxFyAIj/FDc2PFGli1PTvE2QQAw6o=
 github.com/godicom-dev/goopenjpeg v1.3.0/go.mod h1:eaA++xUWUchTHzNGS7DxIh1rrLE31TI4uo7XJvVm9XY=
 github.com/godicom-dev/gorle v1.0.1 h1:ThoepiBxcLYwLkF564c8zVTokPUk0rIVE8t1uHjuZNQ=

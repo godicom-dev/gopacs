@@ -1,0 +1,113 @@
+{{define "head"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.SystemName}}</title>
+<link rel="stylesheet" href="/app/explorer.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="/app/patients">{{.SystemName}}</a>
+  <nav>
+    <a href="/app/patients" {{if eq .Nav "patients"}}aria-current="page"{{end}}>Patients</a>
+    <a href="/app/studies" {{if eq .Nav "studies"}}aria-current="page"{{end}}>Studies</a>
+    <a href="/app/upload" {{if eq .Nav "upload"}}aria-current="page"{{end}}>Upload</a>
+    <a href="/app/lookup" {{if eq .Nav "lookup"}}aria-current="page"{{end}}>Lookup</a>
+  </nav>
+  <p id="stats">{{.StatsLine}}</p>
+</header>
+<main>
+{{end}}
+
+{{define "foot"}}
+</main>
+<script src="/app/explorer.js"></script>
+</body>
+</html>
+{{end}}
+
+{{define "crumbs"}}
+{{if .Crumbs}}<p class="crumbs">{{range .Crumbs}}{{if .Href}}<a href="{{.Href}}">{{.Label}}</a>{{else}}{{.Label}}{{end}}{{end}}</p>{{end}}
+{{end}}
+
+{{define "actions"}}
+<p>
+  {{if .OHIF}}<a class="button" href="{{.OHIF}}" target="_blank" rel="noopener">Open OHIF viewer</a>{{end}}
+  {{if .Download}}<a class="button" href="{{.Download}}">Download DICOM</a>{{end}}
+  {{if .Zip}}<a class="button" href="{{.Zip}}">Download ZIP</a>{{end}}
+  {{if .Delete}}<button class="danger" type="button" data-delete="{{.Delete}}" data-next="{{.Next}}" data-kind="{{.Kind}}">Delete this {{.Kind}}</button>{{end}}
+</p>
+{{end}}
+
+{{define "tags"}}
+{{if .Tags}}<dl>{{range .Tags}}<dt>{{.Name}}</dt><dd>{{.Value}}</dd>{{end}}</dl>{{else}}<p class="empty">No tags</p>{{end}}
+{{end}}
+
+{{define "rows"}}
+<ul class="rows">
+  {{range .Rows}}
+  <li><a href="{{.Href}}"><span><span class="title">{{.Title}}</span>{{if .Sub}}<span class="meta sub">{{.Sub}}</span>{{end}}</span><span class="meta">{{.Side}}</span></a></li>
+  {{else}}
+  <li class="empty">{{.Empty}}</li>
+  {{end}}
+</ul>
+{{end}}
+
+{{define "list"}}
+{{template "head" .}}
+<h1>{{.Title}}</h1>
+<form method="get">
+  <label>Filter <input type="search" name="q" value="{{.Filter}}"></label>
+</form>
+<div class="panel">{{template "rows" .}}</div>
+{{template "foot" .}}
+{{end}}
+
+{{define "detail"}}
+{{template "head" .}}
+{{template "crumbs" .}}
+<h1>{{.Title}}</h1>
+{{if .ShowChildren}}
+<div class="layout">
+  <div class="panel">{{template "tags" .}}{{template "actions" .}}</div>
+  <div class="panel">{{template "rows" .}}</div>
+</div>
+{{else}}
+<div class="panel">{{template "tags" .}}{{template "actions" .}}</div>
+{{end}}
+{{template "foot" .}}
+{{end}}
+
+{{define "upload"}}
+{{template "head" .}}
+<h1>Upload DICOM files</h1>
+<div class="panel">
+  <p>Each file is sent to <code>POST /instances</code>.</p>
+  <label>Files <input id="files" type="file" multiple></label>
+  <button type="button" data-upload>Start the upload</button>
+  <ul class="rows" id="log"></ul>
+</div>
+{{template "foot" .}}
+{{end}}
+
+{{define "lookup"}}
+{{template "head" .}}
+<h1>Lookup</h1>
+<div class="panel">
+  <p>Paste a DICOM UID or an Orthanc identifier.</p>
+  <form method="get" action="/app/lookup">
+    <label>Identifier <input type="text" name="q" value="{{.Filter}}"></label>
+    <button type="submit">Lookup</button>
+  </form>
+  {{if .Searched}}<div>{{template "rows" .}}</div>{{end}}
+</div>
+{{template "foot" .}}
+{{end}}
+
+{{define "message"}}
+{{template "head" .}}
+<h1>{{.Title}}</h1>
+<p class="error">{{.Message}}</p>
+{{template "foot" .}}
+{{end}}

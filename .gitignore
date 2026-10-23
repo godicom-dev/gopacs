@@ -1,6 +1,7 @@
 /gopacs
 /gopacs.exe
 /gopacs-data
+/ohif-dist
 *.db
 *.db-journal
 *.db-wal
